@@ -2029,17 +2029,26 @@ input[type="color"] {
     const applyReward=options.applyReward;
     if(typeof applyReward!=="function")throw new Error("BellQuestBridge requires an applyReward callback.");
     const ledger=readLedger();const seen=new Set(ledger.map(item=>item.id));const candidates=[...fromQuery(),...readCookie()];const imported=[];const rejected=[];
+    let retryPending=false;
     candidates.forEach(pass=>{
       if(!valid(pass)){rejected.push({pass,reason:"invalid"});return;}
       if(seen.has(pass.id)){rejected.push({pass,reason:"duplicate"});return;}
       const remaining=Math.max(0,DAILY_SOURCE_CAP-dailyAwarded(ledger,pass));
       if(!remaining){rejected.push({pass,reason:"daily-cap"});return;}
       const xp=Math.min(pass.xp,remaining);
-      applyReward({childIndex:pass.child,xp,source:pass.source,label:pass.source==="bells-math"?"Bell's Math":"Bell's English",activity:pass.activity,stars:pass.stars,initialAccuracy:pass.initialAccuracy});
+      try {
+        applyReward({childIndex:pass.child,xp,source:pass.source,label:pass.source==="bells-math"?"Bell's Math":"Bell's English",activity:pass.activity,stars:pass.stars,initialAccuracy:pass.initialAccuracy});
+      } catch (_error) {
+        // Keep this pass available if the chosen child has not been added yet.
+        retryPending=true;rejected.push({pass,reason:"child-unavailable"});return;
+      }
       const entry={id:pass.id,source:pass.source,child:pass.child,xp,importedAt:Date.now()};ledger.push(entry);seen.add(pass.id);imported.push(entry);
     });
-    saveLedger(ledger);clearCookie();
-    if(location.search.includes("bellReward=")&&history.replaceState){const clean=location.pathname+location.hash;history.replaceState({},document.title,clean);}
+    saveLedger(ledger);
+    if(!retryPending){
+      clearCookie();
+      if(location.search.includes("bellReward=")&&history.replaceState){const clean=location.pathname+location.hash;history.replaceState({},document.title,clean);}
+    }
     return {imported,rejected};
   }
 
@@ -4897,6 +4906,9 @@ function importLearningRewards() {
     if (learning.imported.length) {
       const total = learning.imported.reduce((sum, pass) => sum + pass.xp, 0);
       setTimeout(() => showToast(`Learning practice claimed: +${total} pts`, 'success'), 300);
+    }
+    if (learning.rejected.some(item => item.reason === 'child-unavailable')) {
+      setTimeout(() => showToast('Learning points are waiting for the selected child profile.', 'error'), 400);
     }
   } catch (error) {
     console.warn('Learning reward could not be imported', error);
