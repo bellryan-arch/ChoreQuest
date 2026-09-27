@@ -1998,6 +1998,53 @@ input[type="color"] {
   </div>
 
 <script>
+/* Chore Quest consumer for Bell Pass v1.
+ * Add this file to Chore Quest, then call BellQuestBridge.importAvailable()
+ * after Chore Quest state has loaded. Supply applyReward to connect to the
+ * existing XP/state update function.
+ */
+(function(root){
+  "use strict";
+  const COOKIE = "bells_pending_rewards";
+  const LEDGER_KEY = "bells_chore_quest_reward_ledger_v1";
+  const MAX_AGE_MS = 48 * 60 * 60 * 1000;
+  const DAILY_SOURCE_CAP = 60;
+
+  function decode(value){
+    const padded=String(value).replace(/-/g,"+").replace(/_/g,"/").padEnd(Math.ceil(value.length/4)*4,"=");
+    const binary=atob(padded);const bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+  function readCookie(){const row=document.cookie.split("; ").find(part=>part.startsWith(COOKIE+"="));if(!row)return[];try{const value=decode(row.slice(COOKIE.length+1));return Array.isArray(value)?value:[];}catch(_error){return[];}}
+  function clearCookie(){const secure=location.protocol==="https:"?"; Secure":"";const domain=location.hostname.endsWith("bellstuff.net")?"; Domain=.bellstuff.net":"";document.cookie=`${COOKIE}=; Max-Age=0; Path=/; SameSite=Lax${secure}${domain}`;}
+  function readLedger(){try{const value=JSON.parse(localStorage.getItem(LEDGER_KEY)||"[]");return Array.isArray(value)?value:[];}catch(_error){return[];}}
+  function saveLedger(items){localStorage.setItem(LEDGER_KEY,JSON.stringify(items.slice(-250)));}
+  function valid(pass){const now=Date.now();return Boolean(pass&&pass.v===1&&typeof pass.id==="string"&&["bells-math","bells-english"].includes(pass.source)&&pass.kind==="learning_session"&&Number.isInteger(pass.child)&&pass.child>=0&&pass.child<=3&&Number.isFinite(pass.xp)&&pass.xp>=5&&pass.xp<=35&&pass.correctedAll===true&&Number.isFinite(pass.issuedAt)&&now-pass.issuedAt<MAX_AGE_MS&&pass.issuedAt<=now+60000);}
+  function dateKey(timestamp){return new Date(timestamp).toISOString().slice(0,10);}
+  function dailyAwarded(ledger,pass){return ledger.filter(item=>item.source===pass.source&&item.child===pass.child&&dateKey(item.importedAt)===dateKey(Date.now())).reduce((sum,item)=>sum+item.xp,0);}
+  function fromQuery(){const params=new URLSearchParams(location.search);const raw=params.get("bellReward");if(!raw)return[];try{return[decode(raw)];}catch(_error){return[];}}
+
+  function importAvailable(options={}){
+    const applyReward=options.applyReward;
+    if(typeof applyReward!=="function")throw new Error("BellQuestBridge requires an applyReward callback.");
+    const ledger=readLedger();const seen=new Set(ledger.map(item=>item.id));const candidates=[...fromQuery(),...readCookie()];const imported=[];const rejected=[];
+    candidates.forEach(pass=>{
+      if(!valid(pass)){rejected.push({pass,reason:"invalid"});return;}
+      if(seen.has(pass.id)){rejected.push({pass,reason:"duplicate"});return;}
+      const remaining=Math.max(0,DAILY_SOURCE_CAP-dailyAwarded(ledger,pass));
+      if(!remaining){rejected.push({pass,reason:"daily-cap"});return;}
+      const xp=Math.min(pass.xp,remaining);
+      applyReward({childIndex:pass.child,xp,source:pass.source,label:pass.source==="bells-math"?"Bell's Math":"Bell's English",activity:pass.activity,stars:pass.stars,initialAccuracy:pass.initialAccuracy});
+      const entry={id:pass.id,source:pass.source,child:pass.child,xp,importedAt:Date.now()};ledger.push(entry);seen.add(pass.id);imported.push(entry);
+    });
+    saveLedger(ledger);clearCookie();
+    if(location.search.includes("bellReward=")&&history.replaceState){const clean=location.pathname+location.hash;history.replaceState({},document.title,clean);}
+    return {imported,rejected};
+  }
+
+  root.BellQuestBridge={importAvailable,valid};
+})(window);
+
 /* ============================================================
    CHORE QUEST — script.js
    ============================================================ */
@@ -4801,6 +4848,26 @@ function setupEvents() {
 
 async function init() {
   loadState();
+  // Learning passes add regular bonus points; existing chorequest_v1 data is preserved.
+  try {
+    const learning = BellQuestBridge.importAvailable({
+      applyReward({ childIndex, xp, label, activity }) {
+        const child = state.children[childIndex];
+        if (!child) throw new Error('Learning reward child is unavailable');
+        state.bonusPoints.push({
+          id: uid(), childId: child.id, points: xp,
+          reason: `${label} · ${activity}`, date: getTodayStr()
+        });
+        saveState();
+      }
+    });
+    if (learning.imported.length) {
+      const total = learning.imported.reduce((sum, pass) => sum + pass.xp, 0);
+      setTimeout(() => showToast(`Learning practice claimed: +${total} pts`, 'success'), 300);
+    }
+  } catch (error) {
+    console.warn('Learning reward could not be imported', error);
+  }
   applyTheme();
   setupEvents();
 
