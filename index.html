@@ -1896,6 +1896,7 @@ input[type="color"] {
         <div class="motivational-quote" id="motivational-quote"></div>
       </div>
       <div class="stats-grid" id="family-stats"></div>
+      <div id="learning-connection" style="margin:12px 0;padding:14px 16px;border-radius:15px;background:#f0f3ff;border:1px solid #dfe5ff;line-height:1.5"></div>
       <div class="family-challenge-banner" id="family-challenge-banner" style="display:none"></div>
       <h3 class="section-label">⚔️ Adventurers</h3>
       <div class="child-cards" id="child-cards"></div>
@@ -2157,6 +2158,7 @@ function getDefaultState() {
       passwordRecord: null,   // { hash, salt } — set on first launch
       hasSetPassword: false,
       onboardingComplete: false,
+      learningLinked: false,
       notificationsEnabled: true,
       soundEnabled: false,
       rotationEnabled: false,
@@ -2264,9 +2266,38 @@ function loadState() {
 function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (state.settings.learningLinked) writeFamilyNamesCookie();
   } catch (e) {
     showToast('Storage full — consider exporting and clearing old data', 'error');
   }
+}
+
+function writeFamilyNamesCookie() {
+  const names = state.children.slice(0,4).map(child => String(child.name || '').trim().slice(0,40));
+  document.cookie = `bells_family_names_v1=${encodeURIComponent(JSON.stringify(names))}; Max-Age=2592000; Path=/; SameSite=Lax; Secure; Domain=.bellstuff.net`;
+}
+
+function connectLearning() {
+  if (!state.settings.onboardingComplete) { startOnboarding(); return; }
+  state.settings.learningLinked = true;
+  saveState();renderLearningConnection();
+  showToast('Child names connected to Math and English on this browser', 'success');
+}
+
+function disconnectLearning() {
+  state.settings.learningLinked = false;
+  saveState();
+  document.cookie = 'bells_family_names_v1=; Max-Age=0; Path=/; SameSite=Lax; Secure; Domain=.bellstuff.net';
+  renderLearningConnection();
+  showToast('Learning names disconnected on this browser', 'success');
+}
+
+function renderLearningConnection() {
+  const box = document.getElementById('learning-connection');
+  if (!box) return;
+  box.innerHTML = state.settings.learningLinked
+    ? `<strong>📚 Learning connected</strong><div>Math and English can show your children's names on this browser. Learning points go to each child's spendable balance; family challenge XP comes from chores.</div><div style="display:flex;flex-wrap:wrap;gap:9px;margin-top:10px"><a class="btn-primary" style="text-decoration:none" href="https://homework.bellstuff.net/">Open Math</a><a class="btn-primary" style="text-decoration:none" href="https://homework.bellstuff.net/english/">Open English</a><button class="btn-secondary" type="button" onclick="disconnectLearning()">Disconnect names</button></div>`
+    : `<strong>📚 Connect learning (optional)</strong><div>Share up to four children's names with Bell's Math and English on this browser, so you can choose who earns points. Practice works without connecting.</div><button class="btn-primary" type="button" style="margin-top:10px" onclick="connectLearning()">Connect Math &amp; English</button>`;
 }
 
 function deepMerge(def, saved) {
@@ -3061,7 +3092,7 @@ function renderDashboard() {
   statsEl.innerHTML = `
     <div class="stat-card"><div class="stat-value">${getFamilyTotalToday()}</div><div class="stat-label">Done Today</div></div>
     <div class="stat-card"><div class="stat-value">${getFamilyWeeklyPct()}%</div><div class="stat-label">Weekly Rate</div></div>
-    <div class="stat-card"><div class="stat-value">${getFamilyTotalXP()}</div><div class="stat-label">Total XP</div></div>
+    <div class="stat-card"><div class="stat-value">${getFamilyTotalXP()}</div><div class="stat-label">Chore XP</div></div>
     <div class="stat-card"><div class="stat-value">${getBestStreak()}🔥</div><div class="stat-label">Best Streak</div></div>
   `;
 
@@ -3070,6 +3101,7 @@ function renderDashboard() {
 
   // Child cards
   renderChildCards();
+  renderLearningConnection();
 }
 
 function renderFamilyChallengeBanner() {
