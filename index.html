@@ -3029,6 +3029,7 @@ async function obFinish() {
   state.settings.onboardingComplete = true;
   saveState();
   closeOnboarding();
+  importLearningRewards();
   launchConfetti();
   showToast('🎉 Welcome to Chore Quest, ' + obFamilyName + '!', 'celebration');
   navigate('dashboard');
@@ -4878,9 +4879,9 @@ function setupEvents() {
 // INIT
 // ============================================================
 
-async function init() {
-  loadState();
-  // Learning passes add regular bonus points; existing chorequest_v1 data is preserved.
+function importLearningRewards() {
+  // Wait until child profiles exist so a pass earned before setup can be claimed
+  // immediately after onboarding, without changing any existing family data.
   try {
     const learning = BellQuestBridge.importAvailable({
       applyReward({ childIndex, xp, label, activity }) {
@@ -4899,7 +4900,13 @@ async function init() {
     }
   } catch (error) {
     console.warn('Learning reward could not be imported', error);
+    showToast('Learning points are waiting. Check the child profile and reopen the reward link.', 'error');
   }
+}
+
+async function init() {
+  loadState();
+  if (state.settings.onboardingComplete) importLearningRewards();
   applyTheme();
   setupEvents();
 
